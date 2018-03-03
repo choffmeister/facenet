@@ -1,5 +1,6 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import align.detect_face
+import argparse
 import facenet
 import json
 import numpy as np
@@ -56,11 +57,10 @@ def makeHandler(graph, sess, pnet, rnet, onet):
 
     return Handler
 
-def create_network_face_detection(gpu_memory_fraction):
+def create_network_face_detection(config):
     graph = tf.Graph()
     graph.as_default()
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_memory_fraction)
-    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False))
+    sess = tf.Session(config=config)
     sess.as_default()
     pnet, rnet, onet = align.detect_face.create_mtcnn(sess, None)
     facenet.load_model('/facenet/data/model-20170512-110547.pb')
@@ -99,15 +99,29 @@ def extract_face_images(image, pnet, rnet, onet):
 
     return faces
 
-def run(port=8080):
-    graph, sess, pnet, rnet, onet = create_network_face_detection(1)
-    httpd = HTTPServer(('', port), makeHandler(graph, sess, pnet, rnet, onet))
-    print('Starting httpd...')
-    httpd.serve_forever()
+def main(args):
+    try:
+        config = tf.ConfigProto(
+            inter_op_parallelism_threads=args.inter_op_parallelism_threads,
+            intra_op_parallelism_threads=args.intra_op_parallelism_threads,
+            gpu_options=tf.GPUOptions(
+                per_process_gpu_memory_fraction=args.per_process_gpu_memory_fraction))
+        print('Tensorflow config:\n%s' % config)
+        graph, sess, pnet, rnet, onet = create_network_face_detection(config)
+
+        httpd = HTTPServer(('', args.port), makeHandler(graph, sess, pnet, rnet, onet))
+        print('Starting http on port: %d' % args.port)
+        httpd.serve_forever()
+    except:
+        traceback.print_exc(file=sys.stdout)
+
+def parse_arguments(argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=8080)
+    parser.add_argument('--inter_op_parallelism_threads', type=int, default=0)
+    parser.add_argument('--intra_op_parallelism_threads', type=int, default=0)
+    parser.add_argument('--per_process_gpu_memory_fraction', type=float, default=0)
+    return parser.parse_args(argv)
 
 if __name__ == '__main__':
-    from sys import argv
-    if len(argv) == 2:
-        run(port=int(argv[1]))
-    else:
-        run()
+    main(parse_arguments(sys.argv[1:]))
